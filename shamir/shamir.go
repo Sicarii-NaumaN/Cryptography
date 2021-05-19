@@ -12,7 +12,7 @@ import (
 // of degree t-1, i.e: data[i] = (i+1, f(i+1)).
 // Note: Polynomial evaluations and coefficients operate under an arithmetic finite field of size P.
 // P is defined under primes.go and it is known to use exactly 257 for its representation.
-func GenKeyShares(secret [32]byte, t, n int) ([][]byte, error) {
+func GenKeyShares(secret []byte, t, n int) ([][]byte, error) {
 	if t < 2 {
 		return nil, fmt.Errorf("unmet constraint t: %d >= 2", t)
 	}

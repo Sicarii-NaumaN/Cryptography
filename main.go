@@ -1,59 +1,139 @@
 package main
 
 import (
-	"encoding/base64"
+	"encoding/hex"
+	"flag"
 	"fmt"
-	"github.com/google/go-cmp/cmp"
 	"log"
 	mrand "math/rand"
-	"strings"
-
 	shamir "shamir/shamir"
 )
 
 func main() {
-	keyTest := "Qlco35ne5pbmhu5eBbFOp2yCLMdNFD/IJ9sq+ZcdoRY="
-	fmt.Println("keyTest: ", keyTest)
-	keyShares := 5
-	keyThreshold := 5
-	useKeys := 5
+	args := &shamir.Parameters{}
+	var err error
 
-	keyBytes, err := base64.StdEncoding.DecodeString(keyTest)
+	if args, err = shamir.ParseFlags(); err != nil {
+		flag.Usage()
+		return
+	}
 
+	// If flag -test is passed
+	if args.Test {
+		// Any private key
+		pkBytes, err := hex.DecodeString("a11b0a4e1a132305652ee7a8eb7848f6ad" +
+			"5ea381e3ce20a2c086a2e388230811")
+		if err != nil {
+			log.Fatalf(err.Error())
+			return
+		}
+
+		fmt.Printf("Passed key:\n%x\n", pkBytes)
+
+		fmt.Println("-------------------------------------")
+
+		// The number of people who need to give out the sharing key
+		keyShares := 3
+
+		// The number of people needed to get the initial private key
+		keyThreshold := 2
+
+		// Spliting input key to keyShares sharing keys
+		keys := Split(pkBytes, keyThreshold, keyShares)
+
+		stringKeys := make([]string, 0)
+		for i := range keys {
+			stringKeys = append(stringKeys, fmt.Sprintf("%x", keys[i]))
+		}
+		fmt.Println("keys:")
+		for i := range stringKeys {
+			fmt.Println(stringKeys[i])
+		}
+
+		// Generating graph points of a function in a coordinate system
+		// These points uses to restore polynomial
+		points := PointsGeneration(len(keys), keys)
+
+		fmt.Println("-------------------------------------")
+		// Getting the result
+		fmt.Printf("%x <---- This is your key", Recover(points))
+		return
+	}
+
+	// If flag -split is passed
+	if args.Split {
+		var secret string
+		var keyShares, keyThreshold int
+		fmt.Println("Enter secret...")
+		fmt.Scan(&secret)
+		fmt.Println("Enter N and T...", )
+		fmt.Scan(&keyShares, &keyThreshold)
+
+		keys := Split([]byte(secret), keyThreshold, keyShares)
+
+		stringKeys := make([]string, 0)
+		for i := range keys {
+			stringKeys = append(stringKeys, fmt.Sprintf("%x", keys[i]))
+		}
+		fmt.Println("keys:")
+		for i := range stringKeys {
+			fmt.Println(stringKeys[i])
+		}
+		return
+	}
+
+	// If flag -recover is passed
+	if args.Recover {
+		keyParts := make([][]byte, 0)
+		var sharingKey string
+
+
+		fmt.Println("Enter sharing keys...")
+		for {
+			_, err = fmt.Scan(&sharingKey)
+			if err != nil {
+				break
+			}
+			pkBytes, _ := hex.DecodeString(sharingKey)
+			keyParts = append(keyParts, pkBytes)
+		}
+
+		points := PointsGeneration(len(keyParts), keyParts)
+		fmt.Printf("%x <---- This is your key", Recover(points))
+		return
+	}
+}
+
+func Split(secret []byte, keyThreshold, keyShares int) [][]byte {
+	keys, err := shamir.GenKeyShares(secret, keyThreshold, keyShares)
 	if err != nil {
-		log.Fatalf("Unexpected error occurred while decoding key; %v", err)
+		log.Fatalf(err.Error())
 	}
-	var key [32]byte
-	copy(key[:], keyBytes)
+	return keys
+}
 
-	stringKeys := make([]string, 0)
-	keys, err := shamir.GenKeyShares(key, keyThreshold, keyShares)
-	for i := range keys {
-		stringKeys = append(stringKeys, string(keys[i]))
+func Recover(points []shamir.Point) string {
+	derivedKey, err := shamir.GetKeyFromKeyShares(points)
+	if err != nil {
+		log.Fatalf(err.Error())
 	}
-	fmt.Println("KEYS: ", stringKeys)
-	pointsMap := make(map[int]bool, useKeys)
-	points := make([]shamir.Point, 0, useKeys)
-	fmt.Println("KEYBYTES: ", keyBytes)
+	decodedKey := string(derivedKey[:])
 
-	// Computed just for readable test output
-	var encodedPoints strings.Builder
-	encodedPoints.WriteString("\n")
+	return decodedKey
+}
 
-	for len(points) < useKeys {
-		x := mrand.Intn(keyShares) + 1
+func PointsGeneration(numOfKeys int, keys [][]byte) []shamir.Point {
+	pointsMap := make(map[int]bool, numOfKeys)
+	points := make([]shamir.Point, 0, numOfKeys)
+
+	for len(points) < numOfKeys {
+		x := mrand.Intn(numOfKeys) + 1
 		if ok := pointsMap[x]; ok {
 			continue
 		}
 		pointsMap[x] = true
 		points = append(points, shamir.Point{X: x, Fx: keys[x-1]})
-		encodedPoints.WriteString(fmt.Sprintf("\t'%d-%s'\n", x, base64.StdEncoding.EncodeToString(keys[x-1][:])))
 	}
 
-	derivedKey, err := shamir.GetKeyFromKeyShares(points)
-	fmt.Println("DERIVEDKEY" , derivedKey)
-	decodedKey := base64.StdEncoding.EncodeToString(derivedKey[:])
-	fmt.Println("DECODEDKEY " , decodedKey)
-	diff := cmp.Diff(keyTest, decodedKey)
-	fmt.Println(diff)
+	return points
 }
